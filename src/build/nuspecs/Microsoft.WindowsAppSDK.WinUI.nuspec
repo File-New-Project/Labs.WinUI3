@@ -11,7 +11,7 @@
     <tags></tags>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
     <projectUrl>https://github.com/file-new-project/labs.winui3</projectUrl>
-    <iconUrl></iconUrl>
+    <iconUrl>https://raw.githubusercontent.com/File-New-Project/Labs.WinUI3/refs/heads/main/src/build/nuspecs/icon.png</iconUrl>
 
     <dependencies>
       <!-- Note: groups can be used to narrow the set of applicable TPMs for a nuget package, as well as to define dependencies for those TPMs.  
