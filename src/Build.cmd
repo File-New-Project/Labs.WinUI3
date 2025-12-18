@@ -141,7 +141,6 @@ if EXIST "%reporoot%\src\XamlCompiler\BuildTasks\Microsoft\Lmr\XamlTypeUniverse.
     call :buildSolution %reporoot%\eng\BuildGenXbfForMSBuild\BuildGenXbfForMSBuild.csproj
     if ERRORLEVEL 1 goto:showDurationAndExit
 )
-
 if "%_targetMux%" == "1" (
     call :buildSolution %reporoot%\dxaml\xcp\dxaml\dllsrv\winrt\native\Microsoft.ui.xaml.vcxproj
 ) else if "%_targetProduct%" == "1" (
