@@ -7,7 +7,7 @@ echo XES_DFSDROP is currently %XES_DFSDROP%
 
 for /F "tokens=1 delims=\" %%A in ('echo %XES_DFSDROP%') do (set XES_DFSDROP_DN=%%A)
 call set XES_DFSDROP_FQDN=%%XES_DFSDROP:!XES_DFSDROP_DN!=!XES_DFSDROP_DN!.redmond.corp.microsoft.com%%
-echo ##vso[task.setvariable variable=XES_DFSDROP;]%XES_DFSDROP_FQDN%
+echo "XES_DFSDROP=%XES_DFSDROP_FQDN%">>%GITHUB_ENV%
 
 pushd %~dp0
 
