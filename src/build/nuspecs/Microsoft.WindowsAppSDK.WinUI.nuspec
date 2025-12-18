@@ -1,18 +1,17 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
   <metadata>
-    <id>Microsoft.WindowsAppSDK.WinUI</id>
+    <id>File-New-Project.Labs.WinUI</id>
     <version>$VERSION$</version>
-    <title>Microsoft WindowsAppSDK WinUI component</title>
-    <authors>Microsoft</authors>
-    <owners>Microsoft</owners>
-    <description>The Windows App SDK empowers all Windows Desktop apps with modern Windows UI, APIs, and platform features, including back-compat support. This package contains the modern Windows UI features.</description>
-    <copyright>© Microsoft Corporation. All rights reserved.</copyright>
-    <tags>Windows "Windows App SDK" WinAppSDK WinUI XAML Fluent Controls Downlevel Compatibility TreeView ColorPicker NavigationView MenuBar</tags>
-    <requireLicenseAcceptance>true</requireLicenseAcceptance>
-    <license type="file">license.txt</license>
-    <projectUrl>https://github.com/microsoft/windowsappsdk</projectUrl>
-    <iconUrl>https://raw.githubusercontent.com/microsoft/WindowsAppSDK/main/assets/WindowsAppSDK64.png</iconUrl>
+    <title>File-New-Project Labs: WinUI</title>
+    <authors>Microsoft, Contributors</authors>
+    <owners>Microsoft, Contributors</owners>
+    <description>Experimental WinUI 3 builds with nightly snapshots, community PRs, and custom features.</description>
+    <copyright>© Microsoft Corporation, Contributors. All rights reserved.</copyright>
+    <tags></tags>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <projectUrl>https://github.com/file-new-project/labs.winui3</projectUrl>
+    <iconUrl></iconUrl>
 
     <dependencies>
       <!-- Note: groups can be used to narrow the set of applicable TPMs for a nuget package, as well as to define dependencies for those TPMs.  
