@@ -5,7 +5,8 @@ Param(
     [string]$VersionOverride,
     [switch]$NoPackageAnalysis,
     [switch]$UseDependencyOverrides,
-    [string]$Nuspec = "Microsoft.ProjectReunion.WinUI.TransportPackage.nuspec"
+    [string]$Nuspec = "Microsoft.ProjectReunion.WinUI.TransportPackage.nuspec",
+    [Parameter(Mandatory=$true)][string]$Channel
 )
 
 #
@@ -121,7 +122,7 @@ if (!(Test-Path $OutputDir)) { mkdir $OutputDir }
 
 # Pass NoWarn=NU5100 to silence warnings for all the native binaries being put
 # into the "runtime-framework\" folder rather than "lib\" or "runtime\".
-$CommonNugetArgs = "-properties `"PackageRoot=$PackageRoot``;Version=$version``;IXP_Version=$IXP_Version``;CsWinRT_Version=$CsWinRT_Version``;WEBVIEW2_Version=$WEBVIEW2_Version``;BASE_COMPONENT_VERSION=$BASE_COMPONENT_VERSION``;FOUNDATION_COMPONENT_VERSION=$FOUNDATION_COMPONENT_VERSION``;IXP_COMPONENT_VERSION=$IXP_COMPONENT_VERSION;NoWarn=NU5100`""
+$CommonNugetArgs = "-properties `"Channel=$Channel``;PackageRoot=$PackageRoot``;Version=$version``;IXP_Version=$IXP_Version``;CsWinRT_Version=$CsWinRT_Version``;WEBVIEW2_Version=$WEBVIEW2_Version``;BASE_COMPONENT_VERSION=$BASE_COMPONENT_VERSION``;FOUNDATION_COMPONENT_VERSION=$FOUNDATION_COMPONENT_VERSION``;IXP_COMPONENT_VERSION=$IXP_COMPONENT_VERSION;NoWarn=NU5100`""
 
 $NugetArgs = "$CommonNugetArgs -OutputDirectory $(Resolve-Path $OutputDir)"
 
