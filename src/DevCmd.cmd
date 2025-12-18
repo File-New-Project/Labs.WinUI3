@@ -61,6 +61,8 @@ if exist %~dp0.buildtools (
 
 endlocal & (
     echo "Initializing VS command prompt from %MSBuildInstallPath%\Common7\Tools\VsDevCmd.bat ..."
+    echo %MSBuildInstallPath%
+    echo %_ARGS%
     call "%MSBuildInstallPath%\Common7\Tools\VsDevCmd.bat" /no_logo %_ARGS%
 )
 
@@ -88,12 +90,24 @@ exit /b
 rem This function is used to set enviroment variables in Azure Pipelines
 rem It will call task.setVariable on top of the regular "set" command if /pipeline is passed in.
 :SetEnviromentVariable
-set _varName=%~1
-set _varValue=%~2
-set %_varName%=%_varValue%
+setlocal enabledelayedexpansion
+set "_varName=%~1"
+set "_varValue=%~2"
+set "!_varName!=!_varValue!"
+
 if not "%Pipeline%"=="true" (
-    @REM I don't know why but if I put the echo line in here, it modifies the value, just batch things
+    endlocal & (
+        set "%~1=%~2"
+    )
     exit /b 0
 )
-echo ##vso[task.setVariable variable=%_varName%]%_varValue%
+
+if "!_varName!"=="PATH" (
+    >>%GITHUB_PATH% echo !_varValue!
+)
+
+>>%GITHUB_ENV% echo !_varName!=!_varValue!
+endlocal & (
+    set "%~1=%~2"
+)
 exit /b 0

@@ -1,0 +1,36 @@
+From 596236a38f8b5ce768d0a1d64d4f001071ff3f42 Mon Sep 17 00:00:00 2001
+From: Galen Elias <gelias@microsoft.com>
+Date: Mon, 16 Dec 2024 11:11:31 -0800
+Subject: [PATCH] RemoveAtEnd on TreeViewNodeVector broken
+
+Ported an app from UWP to WinUI3 and noticed a bunch of UI 'corruption'
+in our TreeView control when filtering elements. Tracked it down to
+TreeView.RootNodes().RemoveAtEnd() always removing the first item
+instead of the last item, which means you are left with a totally
+unexpected result, as well as being unable to remove all the items due
+to never being able to remove index 0.
+
+The bug is due to incorrect parameter passing (ideally unused stack
+variable warnings would be enabled and would catch this), where index
+was intialized, but never passed to RemoveAt, causing the
+`updateItemsSource` boolean to stand in for an index, causing us to
+always delete index 0 or 1 instead of N-1.
+
+The workaround is to just manually use RemoveAt instead of RemoveAtEnd.
+---
+ src/controls/dev/TreeView/TreeViewNode.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/controls/dev/TreeView/TreeViewNode.cpp b/src/controls/dev/TreeView/TreeViewNode.cpp
+index bd19c75b5b..f64a161bc9 100644
+--- a/src/controls/dev/TreeView/TreeViewNode.cpp
++++ b/src/controls/dev/TreeView/TreeViewNode.cpp
+@@ -430,7 +430,7 @@ void TreeViewNodeVector::RemoveAt(unsigned int index, bool updateItemsSource,boo
+ void TreeViewNodeVector::RemoveAtEnd(bool updateItemsSource)
+ {
+     const auto index = GetVectorInnerImpl()->Size() - 1;
+-    RemoveAt(updateItemsSource);
++    RemoveAt(index, updateItemsSource);
+ }
+ 
+ void TreeViewNodeVector::ReplaceAll(winrt::array_view<winrt::TreeViewNode const> values, bool updateItemsSource)
