@@ -163,7 +163,7 @@ if "%DevEnvDir%" == "" (
 
 if "%VisualStudioVersion%" == "16.0" (echo Visual Studio 2019 is not supported. && exit /b /1)
 
-set PATH=%RepoRoot%\.buildtools\MSBuild\Current\Bin\amd64;%RepoRoot%\.tools;%RepoRoot%\.tools\VSS.NuGet.AuthHelper;%RepoRoot%\tools;%RepoRoot%\dxaml\scripts;%PATH%
+call:SetEnviromentVariable PATH "%RepoRoot%\.buildtools\MSBuild\Current\Bin\amd64;%RepoRoot%\.tools;%RepoRoot%\.tools\VSS.NuGet.AuthHelper;%RepoRoot%\tools;%RepoRoot%\dxaml\scripts;%PATH%"
 
 rem If we have init'd from a VS developer command prompt, we should use its tooling instead of the VS build tools installed with the repo
 call:AddPathIfExists "%VSINSTALLDIR%\MSBuild\Current\Bin\amd64"
@@ -207,7 +207,7 @@ if "%ARM64EC%"=="1" (
 
 xcopy /d /y %RepoRoot%\scripts\winui.natvis "%USERPROFILE%\My Documents\Visual Studio 2022\Visualizers\" >nul 2>&1
 
-set EnvironmentInitialized=1
+call:SetEnviromentVariable EnvironmentInitialized "Yes"
 
 if "%NoTitle%"=="" (
    title DCPP %RepoRoot% - %_BuildArch%%_BuildType%
@@ -237,11 +237,24 @@ rem This function is used to set enviroment variables in Azure Pipelines
 rem It will call task.setVariable on top of the regular "set" command if /pipeline is passed in.
 rem See comment at top of file for reasoning
 :SetEnviromentVariable
-set _varName=%~1
-set _varValue=%~2
-set %_varName%=%_varValue%
+setlocal enabledelayedexpansion
+set "_varName=%~1"
+set "_varValue=%~2"
+set "!_varName!=!_varValue!"
+
 if not "%Pipeline%"=="true" (
+    endlocal & (
+        set "%~1=%~2"
+    )
     exit /b 0
 )
-echo ##vso[task.setVariable variable=%_varName%]%_varValue%
+
+if "!_varName!"=="PATH" (
+    >>%GITHUB_PATH% echo !_varValue!
+)
+
+>>%GITHUB_ENV% echo !_varName!=!_varValue!
+endlocal & (
+    set "%~1=%~2"
+)
 exit /b 0
