@@ -1,0 +1,513 @@
+name: Nightly Builds
+
+on:
+  schedule:
+    - cron: '0 15 * * *' # Daily at 3PM UTC / 7AM PST
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: 'Target channel'
+        required: false
+        type: choice
+        options:
+          - all
+          - nightly
+          - nightly-community
+        default: 'all'
+      platform:
+        description: 'Target platform'
+        required: false
+        type: choice
+        options:
+          - all
+          - x64
+          - x86
+          - arm64
+          - arm64ec
+        default: 'all'
+
+env:
+  CACHE_DIR: C:\actions-runner-shared\_cache
+  SYMBOL_STORE_PATH: C:\Symbols
+
+jobs:
+  check-cache:
+    runs-on: [self-hosted, windows]
+    outputs:
+      cache-status: ${{ steps.cache-matrix.outputs.status }}
+    strategy:
+      matrix:
+        channel: ${{ (github.event_name == 'workflow_dispatch' && inputs.channel != 'all') && fromJson(format('["{0}"]', inputs.channel)) || fromJson('["nightly", "nightly-community"]') }}
+        platform: ${{ (github.event_name == 'workflow_dispatch' && inputs.platform != 'all') && fromJson(format('["{0}"]', inputs.platform)) || fromJson('["x64", "x86", "arm64", "arm64ec"]') }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - name: Get commit SHA
+        id: commit
+        run: |
+          $sha = git rev-parse --short HEAD
+          echo "sha=$sha" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+      - name: Check for existing daily cache
+        id: cache-matrix
+        run: |
+          $dateOnly = (Get-Date).ToString("yyyyMMdd")
+          $cacheDir = "${{ env.CACHE_DIR }}\nightly-daily-$dateOnly-${{ steps.commit.outputs.sha }}-${{ matrix.channel }}-${{ matrix.platform }}"
+          $exists = Test-Path $cacheDir
+          
+          if ($exists) {
+            Write-Host "✓ Found existing cache for ${{ matrix.platform }} on ${{ matrix.channel }}: $cacheDir"
+            if (Test-Path "$cacheDir\.build-info.json") {
+              $buildInfo = Get-Content "$cacheDir\.build-info.json" -Raw | ConvertFrom-Json
+              Write-Host "  Build from: $($buildInfo.timestamp)"
+              Write-Host "  Version: $($buildInfo.version)"
+            }
+            echo "status=exists" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Host "✗ No cache found for ${{ matrix.platform }} on ${{ matrix.channel }}, will build"
+            echo "status=missing" >> $env:GITHUB_OUTPUT
+          }
+          
+          echo "cache_dir=$cacheDir" >> $env:GITHUB_OUTPUT
+          echo "date=$dateOnly" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+  build:
+    needs: check-cache
+    runs-on: [self-hosted, windows]
+    if: ${{ needs.check-cache.outputs.cache-status == 'missing' }}
+    strategy:
+      matrix:
+        channel: ${{ (github.event_name == 'workflow_dispatch' && inputs.channel != 'all') && fromJson(format('["{0}"]', inputs.channel)) || fromJson('["nightly", "nightly-community"]') }}
+        platform: ${{ (github.event_name == 'workflow_dispatch' && inputs.platform != 'all') && fromJson(format('["{0}"]', inputs.platform)) || fromJson('["x64", "x86", "arm64", "arm64ec"]') }}
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - name: Apply community patches
+        if: matrix.channel == 'nightly-community'
+        run: |
+          $patchDir = "..\.labs\patches"
+          
+          if (-not (Test-Path $patchDir)) {
+            Write-Host "No patches directory found at $patchDir"
+            exit 0
+          }
+          
+          $patches = Get-ChildItem -Path $patchDir -Filter "*.patch" | Sort-Object Name
+          
+          if ($patches.Count -eq 0) {
+            Write-Host "No patches found in $patchDir"
+            exit 0
+          }
+          
+          Write-Host "Found $($patches.Count) patch(es) to apply:"
+          foreach ($patch in $patches) {
+            Write-Host "  - $($patch.Name)"
+          }
+          
+          foreach ($patch in $patches) {
+            Write-Host "`nApplying $($patch.Name)..."
+            git apply $patch.FullName
+            
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "Failed to apply patch: $($patch.Name)"
+              exit 1
+            }
+            
+            Write-Host "✓ Successfully applied $($patch.Name)"
+          }
+          
+          Write-Host "`n✓ All patches applied successfully"
+        working-directory: src
+        shell: pwsh
+
+      - name: Get commit SHA (short)
+        id: commit
+        run: |
+          $sha = git rev-parse --short HEAD
+          echo "sha=$sha" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+      
+      - name: Generate version
+        id: version
+        run: |
+          $datetime = (Get-Date).ToString("yyyyMMddHHmmss")
+          $dateOnly = (Get-Date).ToString("yyyyMMdd")
+          if ("${{ matrix.channel }}" -eq "nightly-community") {
+            $version = "0.0.0-nightlycommunity.$datetime.${{ steps.commit.outputs.sha }}"
+          } else {
+            $version = "0.0.0-nightly.$datetime.${{ steps.commit.outputs.sha }}"
+          }
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+          echo "date=$dateOnly" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+      - name: Initialize
+        run: >
+          .\init.cmd ${{ matrix.platform }}fre net8 /pipeline
+        shell: cmd
+        working-directory: src
+
+      - name: "Temporary: Manually restore missing ARM64 SDK package"
+        if: matrix.platform == 'arm64'
+        run: nuget install Microsoft.Windows.SDK.cpp.arm64 -Version 10.0.22621.755 -OutputDirectory packages -Source https://api.nuget.org/v3/index.json
+        shell: cmd
+        working-directory: src
+
+      - name: Restore packages
+        run: >
+          powershell -ExecutionPolicy Bypass -NoProfile -File %RepoRoot%\scripts\init\Initialize-Restore.ps1 -RepoRoot %RepoRoot%
+        shell: cmd
+        working-directory: src
+
+      - name: Build
+        env:
+          CL: /MP2
+          BuildPlatform: ${{ matrix.platform }}
+        run: >
+          .\build.cmd prodtest /c /restore /version ${{ steps.version.outputs.version }}
+        shell: cmd
+        working-directory: src
+      
+      - name: Stash packaging artifacts and symbols to daily cache
+        run: |
+          $dateOnly = (Get-Date).ToString("yyyyMMdd")
+          $cacheDir = "${{ env.CACHE_DIR }}\nightly-daily-$dateOnly-${{ steps.commit.outputs.sha }}-${{ matrix.channel }}-${{ matrix.platform }}"
+          New-Item -ItemType Directory -Force -Path $cacheDir
+          
+          if (Test-Path "BuildOutput\packaging\Release") {
+            Copy-Item -Path "BuildOutput\packaging\Release\*" -Destination "$cacheDir\" -Recurse -Force
+            Write-Host "Cached ${{ matrix.platform }} packaging to $cacheDir"
+          }
+
+          $buildArch = switch ("${{ matrix.platform }}") {
+            "x64" { "amd64" }
+            "x86" { "x86" }
+            "arm64" { "arm64" }
+            "arm64ec" { "arm64ec" }
+          }
+          
+          $symbolsPath = "BuildOutput\bin\${buildArch}fre\Symbols\Product"
+          if (Test-Path $symbolsPath) {
+            $symbolsCacheDir = "$cacheDir\Symbols"
+            New-Item -ItemType Directory -Force -Path $symbolsCacheDir
+            Copy-Item -Path "$symbolsPath\*" -Destination "$symbolsCacheDir\" -Recurse -Force
+            Write-Host "Cached ${{ matrix.platform }} (${buildArch}) symbols to $symbolsCacheDir"
+            ls -Recurse $symbolsCacheDir | Select-Object -First 20
+          }
+          
+          # Store build metadata
+          $buildInfo = @{
+            timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+            commit = "${{ steps.commit.outputs.sha }}"
+            full_commit = "$(git rev-parse HEAD)"
+            version = "${{ steps.version.outputs.version }}"
+            channel = "${{ matrix.channel }}"
+            platform = "${{ matrix.platform }}"
+            run_id = "${{ github.run_id }}"
+          }
+          $buildInfo | ConvertTo-Json | Out-File "$cacheDir\.build-info.json" -Encoding UTF8
+          
+          Write-Host "`nCache directory contents:"
+          ls -Recurse $cacheDir | Select-Object -First 30
+        shell: pwsh
+        working-directory: src
+
+      - name: Copy from daily cache to run cache
+        run: |
+          $dateOnly = (Get-Date).ToString("yyyyMMdd")
+          $dailyCacheDir = "${{ env.CACHE_DIR }}\nightly-daily-$dateOnly-${{ steps.commit.outputs.sha }}-${{ matrix.channel }}-${{ matrix.platform }}"
+          $runCacheDir = "${{ env.CACHE_DIR }}\nightly-packaging-${{ github.run_id }}-${{ matrix.channel }}-${{ matrix.platform }}"
+          
+          New-Item -ItemType Directory -Force -Path $runCacheDir
+          Copy-Item -Path "$dailyCacheDir\*" -Destination "$runCacheDir\" -Recurse -Force
+          Write-Host "Copied from daily cache to run cache"
+        shell: pwsh
+
+  prepare-cache:
+    needs: check-cache
+    runs-on: [self-hosted, windows]
+    if: ${{ needs.check-cache.outputs.cache-status == 'exists' }}
+    strategy:
+      matrix:
+        channel: ${{ (github.event_name == 'workflow_dispatch' && inputs.channel != 'all') && fromJson(format('["{0}"]', inputs.channel)) || fromJson('["nightly", "nightly-community"]') }}
+        platform: ${{ (github.event_name == 'workflow_dispatch' && inputs.platform != 'all') && fromJson(format('["{0}"]', inputs.platform)) || fromJson('["x64", "x86", "arm64", "arm64ec"]') }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - name: Get commit SHA
+        id: commit
+        run: |
+          $sha = git rev-parse --short HEAD
+          echo "sha=$sha" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+      - name: Copy from daily cache to run cache
+        run: |
+          $dateOnly = (Get-Date).ToString("yyyyMMdd")
+          $dailyCacheDir = "${{ env.CACHE_DIR }}\nightly-daily-$dateOnly-${{ steps.commit.outputs.sha }}-${{ matrix.channel }}-${{ matrix.platform }}"
+          $runCacheDir = "${{ env.CACHE_DIR }}\nightly-packaging-${{ github.run_id }}-${{ matrix.channel }}-${{ matrix.platform }}"
+          
+          if (Test-Path $dailyCacheDir) {
+            New-Item -ItemType Directory -Force -Path $runCacheDir
+            Copy-Item -Path "$dailyCacheDir\*" -Destination "$runCacheDir\" -Recurse -Force
+            
+            if (Test-Path "$dailyCacheDir\.build-info.json") {
+              $buildInfo = Get-Content "$dailyCacheDir\.build-info.json" -Raw | ConvertFrom-Json
+              Write-Host "✓ Using cached build from today:"
+              Write-Host "  Timestamp: $($buildInfo.timestamp)"
+              Write-Host "  Commit: $($buildInfo.commit)"
+              Write-Host "  Original version: $($buildInfo.version)"
+              Write-Host "  Platform: $($buildInfo.platform)"
+              Write-Host "  Channel: $($buildInfo.channel)"
+            }
+            
+            Write-Host "`nCopied from daily cache to run cache: $runCacheDir"
+          } else {
+            Write-Error "Daily cache not found at $dailyCacheDir"
+            exit 1
+          }
+        shell: pwsh
+
+  package:
+    needs: [check-cache, build, prepare-cache]
+    if: ${{ always() && (needs.build.result == 'success' || needs.prepare-cache.result == 'success') }}
+    runs-on: [self-hosted, windows]
+    strategy:
+      matrix:
+        channel: ${{ (github.event_name == 'workflow_dispatch' && inputs.channel != 'all') && fromJson(format('["{0}"]', inputs.channel)) || fromJson('["nightly", "nightly-community"]') }}
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      TARGET_FOUNDATION_VERSION: '2.0.8-experimental'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - name: Get commit SHA (short)
+        id: commit
+        run: |
+          $sha = git rev-parse --short HEAD
+          echo "sha=$sha" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+      
+      - name: Generate version
+        id: version
+        run: |
+          $datetime = (Get-Date).ToString("yyyyMMddHHmmss")
+          $dateOnly = (Get-Date).ToString("yyyyMMdd")
+          if ("${{ matrix.channel }}" -eq "nightly-community") {
+            $channel = "NightlyCommunity"  
+            $version = "0.0.0-nightlycommunity.$datetime.${{ steps.commit.outputs.sha }}"
+          } else {
+            $channel = "Nightly"
+            $version = "0.0.0-nightly.$datetime.${{ steps.commit.outputs.sha }}"
+          }
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+          echo "channel=$channel" >> $env:GITHUB_OUTPUT
+          echo "date=$dateOnly" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+      - name: Restore cached packaging artifacts
+        run: |
+          $packagingDir = "BuildOutput\packaging\Release"
+          New-Item -ItemType Directory -Force -Path $packagingDir
+          
+          $platforms = if ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ inputs.platform }}" -ne "all") {
+            @("${{ inputs.platform }}")
+          } else {
+            @('x64', 'x86', 'arm64', 'arm64ec')
+          }
+          
+          Write-Host "Restoring artifacts from run cache..."
+          
+          foreach ($platform in $platforms) {
+            $cacheDir = "${{ env.CACHE_DIR }}\nightly-packaging-${{ github.run_id }}-${{ matrix.channel }}-$platform"
+            
+            if (Test-Path $cacheDir) {
+              Write-Host "Overlaying $platform..."
+              Copy-Item -Path "$cacheDir\*" -Destination "$packagingDir\" -Recurse -Force -Exclude "Symbols",".build-info.json"
+              
+              if (Test-Path "$cacheDir\.build-info.json") {
+                $buildInfo = Get-Content "$cacheDir\.build-info.json" -Raw | ConvertFrom-Json
+                Write-Host "  Using build from: $($buildInfo.timestamp) (commit: $($buildInfo.commit))"
+              }
+            } else {
+              Write-Warning "Cache not found for $platform at $cacheDir"
+              exit 1
+            }
+          }
+          
+          Write-Host "`nFinal packaging directory structure:"
+          ls -Recurse $packagingDir | Select-Object -First 50
+        shell: pwsh
+        working-directory: src
+
+      - name: Restore Foundation package
+        run: nuget install Microsoft.WindowsAppSDK.Foundation -Version ${{ env.TARGET_FOUNDATION_VERSION }} -OutputDirectory packages -Source https://api.nuget.org/v3/index.json
+        shell: cmd
+        working-directory: src
+
+      - name: Build NuGet package
+        run: |
+          .\build\nuspecs\build-nupkg.cmd -Channel ${{ steps.version.outputs.channel }} -VersionOverride ${{ steps.version.outputs.version }} -Nuspec File-New-Project.Labs.WinUI.nuspec -PackageRoot ..\..\BuildOutput\packaging\Release -UseDependencyOverrides
+        shell: cmd
+        working-directory: src
+      
+      - name: Push to GitHub Packages
+        run: |
+          ls -Recurse src\PackageStore
+          dotnet nuget push "src\PackageStore\*.nupkg" --source "https://nuget.pkg.github.com/File-New-Project/index.json" --api-key ${{ secrets.GITHUB_TOKEN }} --skip-duplicate
+        shell: pwsh
+
+      - name: Index and publish symbols to symbol store
+        run: |
+          $debuggingTools = "C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\srcsrv"
+          $pdbstr = Join-Path $debuggingTools "pdbstr.exe"
+          $srctool = Join-Path $debuggingTools "srctool.exe"
+          
+          if (-not (Test-Path $pdbstr)) {
+            Write-Error "pdbstr.exe not found at $pdbstr"
+            exit 1
+          }
+          if (-not (Test-Path $srctool)) {
+            Write-Error "srctool.exe not found at $srctool"
+            exit 1
+          }
+          
+          $repoUrl = "https://raw.githubusercontent.com/${{ github.repository }}"
+          $commitSha = "$(git rev-parse HEAD)"
+          
+          Write-Host "Repository: ${{ github.repository }}"
+          Write-Host "Commit SHA: $commitSha"
+          
+          $platforms = if ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ inputs.platform }}" -ne "all") {
+            @("${{ inputs.platform }}")
+          } else {
+            @('x64', 'x86', 'arm64', 'arm64ec')
+          }
+          
+          foreach ($platform in $platforms) {
+            $symbolsCacheDir = "${{ env.CACHE_DIR }}\nightly-packaging-${{ github.run_id }}-${{ matrix.channel }}-$platform\Symbols"
+            
+            if (Test-Path $symbolsCacheDir) {
+              Write-Host "`nProcessing $platform symbols..."
+              
+              $pdbFiles = Get-ChildItem -Path $symbolsCacheDir -Filter "*.pdb" -Recurse
+              
+              Write-Host "Found $($pdbFiles.Count) PDB files for $platform"
+              
+              foreach ($pdb in $pdbFiles) {
+                Write-Host "`n  Processing: $($pdb.Name)"
+                
+                $sources = & $srctool -r $pdb.FullName 2>$null | Where-Object { $_ -match '\\' }
+                
+                if ($sources) {
+                  Write-Host "    Found $($sources.Count) source files"
+                  
+                  $srcSrvContent = "SRCSRV: ini ------------------------------------------------`n"
+                  $srcSrvContent += "VERSION=1`n"
+                  $srcSrvContent += "VERCTRL=http`n"
+                  $srcSrvContent += "SRCSRV: variables ------------------------------------------`n"
+                  $srcSrvContent += "SRCSRVTRG=%var2%`n"
+                  $srcSrvContent += "SRCSRV: source files ---------------------------------------`n"
+                  
+                  $indexedCount = 0
+                  $skippedCount = 0
+                  
+                  foreach ($source in $sources) {
+                    if ($source -match '^C:\\actions-runner-\d+\\_work\\Labs\.WinUI3\\Labs\.WinUI3\\(.*)$') {
+                      $relativePath = $matches[1]
+                      $relativePath = $relativePath -replace '\\', '/'
+                      $gitHubUrl = "$repoUrl/$commitSha/$relativePath"
+                      
+                      $srcSrvContent += "$source*$gitHubUrl`n"
+                      $indexedCount++
+                    } else {
+                      $skippedCount++
+                    }
+                  }
+                  
+                  $srcSrvContent += "SRCSRV: end ------------------------------------------------"
+                  
+                  if ($indexedCount -eq 0) {
+                    Write-Warning "    No files from our build root found, skipping"
+                    continue
+                  }
+                  
+                  Write-Host "    Indexing $indexedCount files (skipping $skippedCount external files)"
+                  
+                  $tempFile = [System.IO.Path]::GetTempFileName()
+                  
+                  try {
+                    Set-Content -Path $tempFile -Value $srcSrvContent -Encoding ASCII -Force
+                    
+                    # Inject source server stream into PDB
+                    $pdbstrOutput = & $pdbstr -w -p:"$($pdb.FullName)" -i:"$tempFile" -s:srcsrv 2>&1
+                    $pdbstrExitCode = $LASTEXITCODE
+                    
+                    if ($pdbstrExitCode -eq 0) {
+                      Write-Host "    ✓ Successfully indexed $indexedCount source files" -ForegroundColor Green
+                    } else {
+                      Write-Error "    ✗ pdbstr failed with exit code $pdbstrExitCode"
+                      if ($pdbstrOutput) {
+                        Write-Host "    Output: $pdbstrOutput"
+                      }
+                    }
+                    
+                  } finally {
+                    if (Test-Path $tempFile) {
+                      Remove-Item $tempFile -Force
+                    }
+                  }
+                } else {
+                  Write-Host "    No source files found in PDB"
+                }
+              }
+              
+              Write-Host "`nPublishing $platform symbols to symbol store..."
+              symstore add /r /f "$symbolsCacheDir\*" /s "${{ env.SYMBOL_STORE_PATH }}" /t "${{ matrix.channel }}" /v "${{ steps.version.outputs.version }}" /c "Nightly build ${{ matrix.channel }} - $platform - commit $commitSha"
+              
+              Write-Host "Published $platform symbols"
+            } else {
+              Write-Warning "No symbols found for $platform at $symbolsCacheDir"
+            }
+          }
+          
+          Write-Host "`nSymbol store updated at ${{ env.SYMBOL_STORE_PATH }}"
+        shell: pwsh
+
+      - name: Cleanup run cache only
+        if: always()
+        run: |
+          $platforms = @('x64', 'x86', 'arm64', 'arm64ec')
+          
+          foreach ($platform in $platforms) {
+            $cacheDir = "${{ env.CACHE_DIR }}\nightly-packaging-${{ github.run_id }}-${{ matrix.channel }}-$platform"
+            if (Test-Path $cacheDir) {
+              Remove-Item -Path $cacheDir -Recurse -Force -ErrorAction SilentlyContinue
+              Write-Host "Cleaned up ${{ matrix.channel }}-$platform"
+            }
+          }
+          
+          Write-Host "Cleaned up all run caches for channel ${{ matrix.channel }}, run ${{ github.run_id }}"
+          
+          $dateOnly = (Get-Date).ToString("yyyyMMdd")
+          Write-Host "Daily cache preserved at ${{ env.CACHE_DIR }}\nightly-daily-$dateOnly-*"
+        shell: pwsh
