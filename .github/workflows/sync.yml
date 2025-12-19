@@ -1,0 +1,69 @@
+name: Sync Upstream
+
+on:
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.SYNC_PAT }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin https://x-access-token:${{ secrets.SYNC_PAT }}@github.com/${{ github.repository }}.git
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/microsoft/microsoft-ui-xaml || true
+          git fetch upstream winui3/main
+
+      - name: Check for changes
+        id: check
+        run: |
+          # Compare main with upstream/winui3/main
+          BEHIND_COUNT=$(git rev-list --count main..upstream/winui3/main)
+          if [ "$BEHIND_COUNT" -gt 0 ]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "commits_behind=$BEHIND_COUNT" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "Already up to date with upstream"
+          fi
+
+      - name: Create sync branch and merge
+        if: steps.check.outputs.has_changes == 'true'
+        run: |
+          BRANCH_NAME="sync-upstream-$(date +%Y%m%d-%H%M%S)"
+          echo "branch_name=$BRANCH_NAME" >> $GITHUB_ENV
+          git checkout -b $BRANCH_NAME
+          
+          if git merge upstream/winui3/main --no-edit; then
+            echo "merge_status=success" >> $GITHUB_ENV
+          else
+            echo "merge_status=conflict" >> $GITHUB_ENV
+          fi
+
+      - name: Push sync branch
+        if: steps.check.outputs.has_changes == 'true'
+        run: |
+          git push origin ${{ env.branch_name }}
+      
+      - name: Create Pull Request
+        if: steps.check.outputs.has_changes == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_PAT }}
+        run: |
+          gh pr create \
+            --base main \
+            --head ${{ env.branch_name }} \
+            --title "Sync upstream winui3/main - $(date +%Y-%m-%d)" \
+            --body ""
