@@ -13,12 +13,12 @@
 **Nightly** - `FileNewProject.Labs.WinUI.Nightly`
 - Automated daily builds from [microsoft/microsoft-ui-xaml:winui3/main](https://github.com/microsoft/microsoft-ui-xaml/tree/winui3/main)
 - Unmodified upstream code
-- Version format: `0.0.0-nightly.YYYYMMDD.SHA`
+- Version format: `0.0.0-nightly.yyyyMMddHHmmss.sha`
 
 **NightlyCommunity** - `FileNewProject.Labs.WinUI.NightlyCommunity`
 - Nightly builds + curated community PRs
 - Faster access to bug fixes waiting for official merge
-- Version format: `0.0.0-nightlycommunity.YYYYMMDD`
+- Version format: `0.0.0-nightlycommunity.yyyyMMddHHmmss.sha`
 
 **Custom** - `FileNewProject.Labs.WinUI.Custom` (coming later)
 - NightlyCommunity + other experiments
@@ -33,9 +33,7 @@ All builds run automatically on a daily schedule:
 |------|----------|-------------|
 | 12:00 PM (04:00 AM PST) | **Sync with upstream** | Syncs `main` with `microsoft/microsoft-ui-xaml:winui3/main` |
 | 1:00 PM (05:00 AM PST)| **Rebase nightlycommunity** | Rebases `nightly-community` onto updated `main` |
-| 3:00 PM (07:00 AM PST) | **Build nightly** | Builds `Nightly` package from `main` |
-| 3:30 PM (07:30 AM PST) | **Build nightlycommunity** | Builds `NightlyCommunity` package from `nightly-community` |
-
+| 3:00 PM (07:00 AM PST) | **Build world** | Builds `Nightly` and `NightlyCommunity` packages |
 
 ## Getting Started
 
@@ -64,8 +62,6 @@ All builds run automatically on a daily schedule:
 dotnet add package FileNewProject.Labs.WinUI.Nightly --prerelease
 # or
 dotnet add package FileNewProject.Labs.WinUI.NightlyCommunity --prerelease
-# or
-dotnet add package FileNewProject.Labs.WinUI.Custom --prerelease
 ```
 
 ## Nightly Community Included Fixes

@@ -1,0 +1,167 @@
+name: Nightly Builds
+
+on:
+  schedule:
+    - cron: '0 15 * * *' # Daily at 3PM UTC / 7AM PST
+  workflow_dispatch:
+
+env:
+  CACHE_DIR: C:\actions-runner-shared\_cache
+
+jobs:
+  build:
+    runs-on: [self-hosted, windows]
+    strategy:
+      matrix:
+        branch: [main, nightly-community]
+        platform: [x64, x86, arm64, arm64ec]
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ matrix.branch }}
+
+      - name: Get commit SHA (short)
+        id: commit
+        run: |
+          $sha = git rev-parse --short HEAD
+          echo "sha=$sha" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+      
+      - name: Generate version
+        id: version
+        run: |
+          $datetime = (Get-Date).ToString("yyyyMMddHHmmss")
+          if ("${{ matrix.branch }}" -eq "nightly-community") {
+            $version = "0.0.0-nightlycommunity.$datetime.${{ steps.commit.outputs.sha }}"
+          } else {
+            $version = "0.0.0-nightly.$datetime.${{ steps.commit.outputs.sha }}"
+          }
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+      - name: Initialize
+        run: >
+          .\init.cmd ${{ matrix.platform }}fre net8 /pipeline
+        shell: cmd
+        working-directory: src
+
+      - name: "Temporary: Manually restore missing ARM64 SDK package"
+        if: matrix.platform == 'arm64'
+        run: nuget install Microsoft.Windows.SDK.cpp.arm64 -Version 10.0.22621.755 -OutputDirectory packages -Source https://api.nuget.org/v3/index.json
+        shell: cmd
+        working-directory: src
+
+      - name: Restore packages
+        run: >
+          powershell -ExecutionPolicy Bypass -NoProfile -File %RepoRoot%\scripts\init\Initialize-Restore.ps1 -RepoRoot %RepoRoot%
+        shell: cmd
+        working-directory: src
+
+      - name: Build
+        env:
+          CL: /MP2
+          BuildPlatform: ${{ matrix.platform }}
+        run: >
+          .\build.cmd prodtest /c /restore /version ${{ steps.version.outputs.version }}
+        shell: cmd
+        working-directory: src
+      
+      - name: Stash packaging artifacts
+        if: matrix.platform != 'arm64ec'
+        run: |
+          $cacheDir = "${{ env.CACHE_DIR }}\nightly-packaging-${{ github.run_id }}-${{ matrix.branch }}-${{ matrix.platform }}"
+          New-Item -ItemType Directory -Force -Path $cacheDir
+          
+          if (Test-Path "BuildOutput\packaging\Release") {
+            Copy-Item -Path "BuildOutput\packaging\Release\*" -Destination "$cacheDir\" -Recurse -Force
+            Write-Host "Cached ${{ matrix.platform }} packaging to $cacheDir"
+            ls -Recurse $cacheDir | Select-Object -First 20
+          } else {
+            Write-Warning "No packaging output found for ${{ matrix.platform }}"
+          }
+        shell: pwsh
+        working-directory: src
+
+  package:
+    needs: build
+    runs-on: [self-hosted, windows]
+    strategy:
+      matrix:
+        branch: [main, nightly-community]
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      TARGET_FOUNDATION_VERSION: '2.0.8-experimental'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ matrix.branch }}
+
+      - name: Get commit SHA (short)
+        id: commit
+        run: |
+          $sha = git rev-parse --short HEAD
+          echo "sha=$sha" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+      
+      - name: Generate version
+        id: version
+        run: |
+          $datetime = (Get-Date).ToString("yyyyMMddHHmmss")
+          if ("${{ matrix.branch }}" -eq "nightly-community") {
+            $version = "0.0.0-nightlycommunity.$datetime.${{ steps.commit.outputs.sha }}"
+          } else {
+            $version = "0.0.0-nightly.$datetime.${{ steps.commit.outputs.sha }}"
+          }
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+      - name: Restore cached packaging artifacts
+        run: |
+          $packagingDir = "BuildOutput\packaging\Release"
+          New-Item -ItemType Directory -Force -Path $packagingDir
+          
+          foreach ($platform in @('x64', 'x86', 'arm64')) {
+            $cacheDir = "${{ env.CACHE_DIR }}\nightly-packaging-${{ github.run_id }}-${{ matrix.branch }}-$platform"
+            if (Test-Path $cacheDir) {
+              Write-Host "Overlaying $platform..."
+              Copy-Item -Path "$cacheDir\*" -Destination "$packagingDir\" -Recurse -Force
+            } else {
+              Write-Warning "Cache not found for $platform at $cacheDir"
+              exit 1
+            }
+          }
+          
+          Write-Host "`nFinal packaging directory structure:"
+          ls -Recurse $packagingDir | Select-Object -First 50
+        shell: pwsh
+        working-directory: src
+
+      - name: Restore Foundation package
+        run: nuget install Microsoft.WindowsAppSDK.Foundation -Version ${{ env.TARGET_FOUNDATION_VERSION }} -OutputDirectory packages -Source https://api.nuget.org/v3/index.json
+        shell: cmd
+        working-directory: src
+
+      - name: Build NuGet package
+        run: |
+          .\build\nuspecs\build-nupkg.cmd -VersionOverride ${{ steps.version.outputs.version }} -Nuspec Microsoft.WindowsAppSDK.WinUI.nuspec -PackageRoot ..\..\BuildOutput\packaging\Release -UseDependencyOverrides
+        shell: cmd
+        working-directory: src
+      
+      - name: Push to GitHub Packages
+        run: |
+          ls -Recurse src\PackageStore
+          dotnet nuget push "src\PackageStore\*.nupkg" --source "https://nuget.pkg.github.com/File-New-Project/index.json" --api-key ${{ secrets.GITHUB_TOKEN }} --skip-duplicate
+        shell: pwsh
+
+      - name: Cleanup cache
+        if: always()
+        run: |
+          Remove-Item -Path "${{ env.CACHE_DIR }}\nightly-packaging-${{ github.run_id }}-${{ matrix.branch }}-*" -Recurse -Force -ErrorAction SilentlyContinue
+          Write-Host "Cleaned up cache for run ${{ github.run_id }}"
+        shell: pwsh
