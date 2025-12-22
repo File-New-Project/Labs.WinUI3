@@ -1,0 +1,65 @@
+name: Sync NightlyCommunity
+
+on:
+  schedule:
+    - cron: '15 12 * * *' # Daily at 12:15PM UTC / 4:15AM PST
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.SYNC_PAT }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch latest branches
+        run: |
+          git fetch origin main
+          git fetch origin nightly-community
+
+      - name: Check if main has new commits
+        id: check
+        run: |
+          BEHIND_COUNT=$(git rev-list --count origin/nightly-community..origin/main)
+          if [ "$BEHIND_COUNT" -gt 0 ]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "nightly-community is $BEHIND_COUNT commits behind main"
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "nightly-community is up to date with main"
+          fi
+
+      - name: Rebase nightly-community on main
+        if: steps.check.outputs.has_changes == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_PAT }}
+        run: |
+          BRANCH_NAME="sync-nightlycommunity-$(date +%Y%m%d-%H%M%S)"
+          
+          git checkout -b $BRANCH_NAME origin/nightly-community
+          git rebase origin/main
+          
+          # Check if rebase actually changed anything
+          if git diff --quiet origin/nightly-community; then
+            echo "No changes after rebase, already up to date"
+            exit 0
+          fi
+          
+          git push -u origin $BRANCH_NAME
+          
+          PR_URL=$(gh pr create \
+            --title "Sync nightly-community with main - $(date +%Y-%m-%d)" \
+            --body "Automated rebase of nightly-community onto main" \
+            --base nightly-community \
+            --head $BRANCH_NAME)
+          
+          gh pr merge "$PR_URL" --auto --rebase
