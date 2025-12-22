@@ -20,10 +20,22 @@
 - Faster access to bug fixes waiting for official merge
 - Version format: `0.0.0-nightlycommunity.YYYYMMDD`
 
-**Custom** - `FileNewProject.Labs.WinUI.Custom`
+**Custom** - `FileNewProject.Labs.WinUI.Custom` (coming later)
 - NightlyCommunity + other experiments
 - Custom modifications and features
 - Version format: `0.0.0-custom.N`
+
+## Build Schedule
+
+All builds run automatically on a daily schedule:
+
+| Time | Event | Description |
+|------|----------|-------------|
+| 12:00 PM (04:00 AM PST) | **Sync with upstream** | Syncs `main` with `microsoft/microsoft-ui-xaml:winui3/main` |
+| 1:00 PM (05:00 AM PST)| **Rebase nightlycommunity** | Rebases `nightly-community` onto updated `main` |
+| 3:00 PM (07:00 AM PST) | **Build nightly** | Builds `Nightly` package from `main` |
+| 3:30 PM (07:30 AM PST) | **Build nightlycommunity** | Builds `NightlyCommunity` package from `nightly-community` |
+
 
 ## Getting Started
 
