@@ -126,12 +126,12 @@ if "%amd64%"=="1" (
     call:SetEnviromentVariable Platform x64
 )
 if "%ARM64%"=="1" (
-    call:SetEnviromentVariable _BuildArch ARM64
-    call:SetEnviromentVariable Platform ARM64
+    call:SetEnviromentVariable _BuildArch arm64
+    call:SetEnviromentVariable Platform arm64
 )
 if "%ARM64EC%"=="1" (
-    call:SetEnviromentVariable _BuildArch ARM64EC
-    call:SetEnviromentVariable Platform ARM64EC
+    call:SetEnviromentVariable _BuildArch arm64ec
+    call:SetEnviromentVariable Platform arm64ec
 )
 if not "%Pipeline%"=="true" (
     call:SetEnviromentVariable BUILDPLATFORM %Platform%
