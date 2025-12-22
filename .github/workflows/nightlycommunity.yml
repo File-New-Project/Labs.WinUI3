@@ -1,0 +1,53 @@
+name: Nightly Community Build
+
+on:
+  schedule:
+    - cron: '30 15 * * *' # Daily at 3:30PM UTC / 7:30AM PST
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: [self-hosted, windows]
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: nightly-community
+
+      - name: Generate version
+        id: version
+        run: |
+          $date = Get-Date -Format "yyyyMMdd"
+          $version = "0.0.0-nightlycommunity.$date"
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+      - name: Initialize
+        run: >
+          .\init.cmd amd64fre net8 /pipeline
+        shell: cmd
+        working-directory: src
+
+      - name: Restore packages # Workaround for odd /pipeline implementation
+        run: >
+          powershell -ExecutionPolicy Bypass -NoProfile -File %RepoRoot%\scripts\init\Initialize-Restore.ps1 -RepoRoot %RepoRoot%
+        shell: cmd
+        working-directory: src
+
+      - name: Build
+        env:
+          CL: /MP2 # Workaround for internal compiler heap exhaustion issue upstream
+          BuildPlatform: ${{ env.Platform }}
+        run: >
+          .\build.cmd prodtest /c /restore /version ${{ steps.version.outputs.version }}
+        shell: cmd
+        working-directory: src
+      
+      - name: Push to GitHub Packages
+        run: |
+          ls -recurse src\PackageStore
+          dotnet nuget push "$(Resolve-Path src\PackageStore\*.nupkg)" --source "https://nuget.pkg.github.com/File-New-Project/index.json" --api-key ${{ secrets.GITHUB_TOKEN }} --skip-duplicate
+        shell: pwsh
