@@ -56,6 +56,21 @@ dotnet add package FileNewProject.Labs.WinUI.NightlyCommunity --prerelease
 dotnet add package FileNewProject.Labs.WinUI.Custom --prerelease
 ```
 
+## Nightly Community Included Fixes
+
+The NightlyCommunity channel includes carefully selected community PRs that address critical bugs:
+
+**CueStyler Fixes:**
+- CueStyler: Fix TimedTextPadding being applied incorrectly
+  - https://github.com/microsoft/microsoft-ui-xaml/pull/9248
+
+- CueStyler: Fix outline rendering of TimedTextCue elements
+  - https://github.com/microsoft/microsoft-ui-xaml/pull/9224
+
+**TreeView Fixes:**
+- RemoveAtEnd on TreeViewNodeVector broken
+  - https://github.com/microsoft/microsoft-ui-xaml/pull/10239
+
 ## Disclaimers and Warnings
 
 - **Unofficial and unsupported** - This is not an official Microsoft project
