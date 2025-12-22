@@ -2,7 +2,7 @@ name: Sync NightlyCommunity
 
 on:
   schedule:
-    - cron: '15 12 * * *' # Daily at 12:15PM UTC / 4:15AM PST
+    - cron: '0 13 * * *' # Daily at 1PM UTC / 5AM PST
   workflow_dispatch:
 
 jobs:
