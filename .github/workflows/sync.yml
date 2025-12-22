@@ -1,6 +1,8 @@
 name: Sync Upstream
 
 on:
+  schedule:
+    - cron: '0 12 * * *' # Daily at 12PM UTC / 4AM PST
   workflow_dispatch:
 
 jobs:
@@ -42,8 +44,6 @@ jobs:
           
           git push -u origin $BRANCH_NAME
           
-          sleep 10 # Wait for GitHub to process the new branch
-
           PR_URL=$(gh pr create \
             --title "Sync upstream winui3/main - $(date +%Y-%m-%d)" \
             --body "Automated upstream sync" \
@@ -52,7 +52,5 @@ jobs:
           
           echo "Created PR: $PR_URL"
 
-          sleep 10 # Wait for GitHub to process the new PR
-          
           gh pr merge "$PR_URL" --auto --squash
           echo "Auto-merge enabled"
