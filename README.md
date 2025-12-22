@@ -13,17 +13,17 @@
 **Nightly** - `FileNewProject.Labs.WinUI.Nightly`
 - Automated daily builds from [microsoft/microsoft-ui-xaml:winui3/main](https://github.com/microsoft/microsoft-ui-xaml/tree/winui3/main)
 - Unmodified upstream code
-- Version format: `3.0.0-nightly.YYYYMMDD.SHA`
+- Version format: `0.0.0-nightly.YYYYMMDD.SHA`
 
 **NightlyCommunity** - `FileNewProject.Labs.WinUI.NightlyCommunity`
 - Nightly builds + curated community PRs
 - Faster access to bug fixes waiting for official merge
-- Version format: `3.0.0-nightlycommunity.YYYYMMDD`
+- Version format: `0.0.0-nightlycommunity.YYYYMMDD`
 
 **Custom** - `FileNewProject.Labs.WinUI.Custom`
 - NightlyCommunity + other experiments
 - Custom modifications and features
-- Version format: `3.0.0-custom.N`
+- Version format: `0.0.0-custom.N`
 
 ## Getting Started
 
