@@ -1,20 +1,42 @@
 name: Nightly Builds
 
 on:
-  schedule:
-    - cron: '0 15 * * *' # Daily at 3PM UTC / 7AM PST
+  # schedule:
+  #   - cron: '0 15 * * *' # Daily at 3PM UTC / 7AM PST
   workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Target branch'
+        required: false
+        type: choice
+        options:
+          - all
+          - main
+          - nightly-community
+        default: 'all'
+      platform:
+        description: 'Target platform'
+        required: false
+        type: choice
+        options:
+          - all
+          - x64
+          - x86
+          - arm64
+          - arm64ec
+        default: 'all'
 
 env:
   CACHE_DIR: C:\actions-runner-shared\_cache
+  SYMBOL_STORE_PATH: C:\Symbols
 
 jobs:
   build:
     runs-on: [self-hosted, windows]
     strategy:
       matrix:
-        branch: [main, nightly-community]
-        platform: [x64, x86, arm64, arm64ec]
+        branch: ${{ (github.event_name == 'workflow_dispatch' && inputs.branch != 'all') && fromJson(format('["{0}"]', inputs.branch)) || fromJson('["main", "nightly-community"]') }}
+        platform: ${{ (github.event_name == 'workflow_dispatch' && inputs.platform != 'all') && fromJson(format('["{0}"]', inputs.platform)) || fromJson('["x64", "x86", "arm64", "arm64ec"]') }}
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: '1'
 
@@ -70,8 +92,7 @@ jobs:
         shell: cmd
         working-directory: src
       
-      - name: Stash packaging artifacts
-        if: matrix.platform != 'arm64ec'
+      - name: Stash packaging artifacts and symbols
         run: |
           $cacheDir = "${{ env.CACHE_DIR }}\nightly-packaging-${{ github.run_id }}-${{ matrix.branch }}-${{ matrix.platform }}"
           New-Item -ItemType Directory -Force -Path $cacheDir
@@ -79,10 +100,26 @@ jobs:
           if (Test-Path "BuildOutput\packaging\Release") {
             Copy-Item -Path "BuildOutput\packaging\Release\*" -Destination "$cacheDir\" -Recurse -Force
             Write-Host "Cached ${{ matrix.platform }} packaging to $cacheDir"
-            ls -Recurse $cacheDir | Select-Object -First 20
-          } else {
-            Write-Warning "No packaging output found for ${{ matrix.platform }}"
           }
+
+          $buildArch = switch ("${{ matrix.platform }}") {
+            "x64" { "amd64" }
+            "x86" { "x86" }
+            "arm64" { "arm64" }
+            "arm64ec" { "arm64ec" }
+          }
+          
+          $symbolsPath = "BuildOutput\bin\${buildArch}fre\Symbols\Product"
+          if (Test-Path $symbolsPath) {
+            $symbolsCacheDir = "$cacheDir\Symbols"
+            New-Item -ItemType Directory -Force -Path $symbolsCacheDir
+            Copy-Item -Path "$symbolsPath\*" -Destination "$symbolsCacheDir\" -Recurse -Force
+            Write-Host "Cached ${{ matrix.platform }} (${buildArch}) symbols to $symbolsCacheDir"
+            ls -Recurse $symbolsCacheDir | Select-Object -First 20
+          }
+          
+          Write-Host "`nCache directory contents:"
+          ls -Recurse $cacheDir | Select-Object -First 30
         shell: pwsh
         working-directory: src
 
@@ -91,7 +128,7 @@ jobs:
     runs-on: [self-hosted, windows]
     strategy:
       matrix:
-        branch: [main, nightly-community]
+        branch: ${{ (github.event_name == 'workflow_dispatch' && inputs.branch != 'all') && fromJson(format('["{0}"]', inputs.branch)) || fromJson('["main", "nightly-community"]') }}
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: '1'
       TARGET_FOUNDATION_VERSION: '2.0.8-experimental'
@@ -114,11 +151,14 @@ jobs:
         run: |
           $datetime = (Get-Date).ToString("yyyyMMddHHmmss")
           if ("${{ matrix.branch }}" -eq "nightly-community") {
+            $channel = "NightlyCommunity"  
             $version = "0.0.0-nightlycommunity.$datetime.${{ steps.commit.outputs.sha }}"
           } else {
+            $channel = "Nightly"
             $version = "0.0.0-nightly.$datetime.${{ steps.commit.outputs.sha }}"
           }
           echo "version=$version" >> $env:GITHUB_OUTPUT
+          echo "channel=$channel" >> $env:GITHUB_OUTPUT
         shell: pwsh
 
       - name: Restore cached packaging artifacts
@@ -126,11 +166,17 @@ jobs:
           $packagingDir = "BuildOutput\packaging\Release"
           New-Item -ItemType Directory -Force -Path $packagingDir
           
-          foreach ($platform in @('x64', 'x86', 'arm64')) {
+          $platforms = if ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ inputs.platform }}" -ne "all") {
+            @("${{ inputs.platform }}")
+          } else {
+            @('x64', 'x86', 'arm64', 'arm64ec')
+          }
+          
+          foreach ($platform in $platforms) {
             $cacheDir = "${{ env.CACHE_DIR }}\nightly-packaging-${{ github.run_id }}-${{ matrix.branch }}-$platform"
             if (Test-Path $cacheDir) {
               Write-Host "Overlaying $platform..."
-              Copy-Item -Path "$cacheDir\*" -Destination "$packagingDir\" -Recurse -Force
+              Copy-Item -Path "$cacheDir\*" -Destination "$packagingDir\" -Recurse -Force -Exclude "Symbols"
             } else {
               Write-Warning "Cache not found for $platform at $cacheDir"
               exit 1
@@ -149,7 +195,7 @@ jobs:
 
       - name: Build NuGet package
         run: |
-          .\build\nuspecs\build-nupkg.cmd -VersionOverride ${{ steps.version.outputs.version }} -Nuspec Microsoft.WindowsAppSDK.WinUI.nuspec -PackageRoot ..\..\BuildOutput\packaging\Release -UseDependencyOverrides
+          .\build\nuspecs\build-nupkg.cmd -Channel ${{ steps.version.outputs.channel }} -VersionOverride ${{ steps.version.outputs.version }} -Nuspec File-New-Project.Labs.WinUI.nuspec -PackageRoot ..\..\BuildOutput\packaging\Release -UseDependencyOverrides
         shell: cmd
         working-directory: src
       
@@ -157,6 +203,105 @@ jobs:
         run: |
           ls -Recurse src\PackageStore
           dotnet nuget push "src\PackageStore\*.nupkg" --source "https://nuget.pkg.github.com/File-New-Project/index.json" --api-key ${{ secrets.GITHUB_TOKEN }} --skip-duplicate
+        shell: pwsh
+
+      - name: Index and publish symbols to symbol store
+        run: |
+          New-Item -ItemType Directory -Force -Path "${{ env.SYMBOL_STORE_PATH }}"
+          
+          $debuggingTools = "C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\srcsrv"
+          $pdbstr = Join-Path $debuggingTools "pdbstr.exe"
+          $srctool = Join-Path $debuggingTools "srctool.exe"
+          
+          if (-not (Test-Path $pdbstr)) {
+            Write-Error "pdbstr.exe not found at $pdbstr"
+            exit 1
+          }
+          if (-not (Test-Path $srctool)) {
+            Write-Error "srctool.exe not found at $srctool"
+            exit 1
+          }
+          
+          $repoUrl = "https://raw.githubusercontent.com/${{ github.repository }}"
+          $commitSha = "$(git rev-parse HEAD)"
+          
+          Write-Host "Repository: ${{ github.repository }}"
+          Write-Host "Commit SHA: $commitSha"
+          
+          $platforms = if ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ inputs.platform }}" -ne "all") {
+            @("${{ inputs.platform }}")
+          } else {
+            @('x64', 'x86', 'arm64', 'arm64ec')
+          }
+          
+          foreach ($platform in $platforms) {
+            $symbolsCacheDir = "${{ env.CACHE_DIR }}\nightly-packaging-${{ github.run_id }}-${{ matrix.branch }}-$platform\Symbols"
+            
+            if (Test-Path $symbolsCacheDir) {
+              Write-Host "`nProcessing $platform symbols..."
+              
+              $pdbFiles = Get-ChildItem -Path $symbolsCacheDir -Filter "*.pdb" -Recurse
+              
+              Write-Host "Found $($pdbFiles.Count) PDB files for $platform"
+              
+              foreach ($pdb in $pdbFiles) {
+                Write-Host "  Source indexing $($pdb.Name)..."
+                $sources = & $srctool -r $pdb.FullName 2>$null | Where-Object { $_ -match '\\' }
+                
+                if ($sources) {
+                  $sampleSource = $sources | Select-Object -First 1
+                  $buildRoot = $null
+                  
+                  if ($sampleSource -match '^([A-Z]:\\.*?\\Labs\.WinUI3\\Labs\.WinUI3\\)') {
+                    $buildRoot = $matches[1]
+                    Write-Host "    Detected build root: $buildRoot"
+                  } else {
+                    Write-Warning "    Could not detect build root from: $sampleSource"
+                    Write-Warning "    Skipping source indexing for this PDB"
+                    continue
+                  }
+                  
+                  $srcSrvContent = "SRCSRV: ini ------------------------------------------------`n"
+                  $srcSrvContent += "VERSION=1`n"
+                  $srcSrvContent += "VERCTRL=http`n"
+                  $srcSrvContent += "SRCSRV: variables ------------------------------------------`n"
+                  $srcSrvContent += "SRCSRVTRG=%var2%`n"
+                  $srcSrvContent += "SRCSRV: source files ---------------------------------------`n"
+                  
+                  $indexedCount = 0
+                  foreach ($source in $sources) {
+                    $relativePath = $source -replace [regex]::Escape($buildRoot), ""
+                    $relativePath = $relativePath -replace '\\', '/'
+                    $gitHubUrl = "$repoUrl/$commitSha/$relativePath"
+                    
+                    $srcSrvContent += "$source*$gitHubUrl`n"
+                    $indexedCount++
+                  }
+                  
+                  $srcSrvContent += "SRCSRV: end ------------------------------------------------"
+                  
+                  $tempFile = [System.IO.Path]::GetTempFileName()
+                  Set-Content -Path $tempFile -Value $srcSrvContent -Encoding ASCII
+                  
+                  $result = & $pdbstr -w -p:$($pdb.FullName) -i:$tempFile -s:srcsrv 2>&1
+                  
+                  Remove-Item $tempFile -Force
+                  Write-Host "    Indexed $indexedCount source files"
+                } else {
+                  Write-Host "    No source files found in PDB"
+                }
+              }
+              
+              Write-Host "Publishing $platform symbols to symbol store..."
+              & "C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\symstore.exe" add /r /f "$symbolsCacheDir\*" /s "${{ env.SYMBOL_STORE_PATH }}" /t "${{ matrix.branch }}" /v "${{ steps.version.outputs.version }}" /c "Nightly build ${{ matrix.branch }} - $platform - commit $commitSha"
+              
+              Write-Host "Published $platform symbols"
+            } else {
+              Write-Warning "No symbols found for $platform at $symbolsCacheDir"
+            }
+          }
+          
+          Write-Host "`nSymbol store updated at ${{ env.SYMBOL_STORE_PATH }}"
         shell: pwsh
 
       - name: Cleanup cache
