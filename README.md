@@ -27,13 +27,12 @@
 
 ## Build Schedule
 
-All builds run automatically on a daily schedule:
+All activity follows a schedule:
 
 | Time | Event | Description |
-|------|----------|-------------|
-| 12:00 PM (04:00 AM PST) | **Sync with upstream** | Syncs `main` with `microsoft/microsoft-ui-xaml:winui3/main` |
-| 1:00 PM (05:00 AM PST)| **Rebase nightlycommunity** | Rebases `nightly-community` onto updated `main` |
-| 3:00 PM (07:00 AM PST) | **Build world** | Builds `Nightly` and `NightlyCommunity` packages |
+|------|-------|-------------|
+| 12:00 PM UTC (04:00 AM PST) | **Sync with upstream** | Syncs `main` with `microsoft/microsoft-ui-xaml:winui3/main` |
+| 3:00 PM UTC (07:00 AM PST) | **Build world** | Builds `Nightly` and `NightlyCommunity` packages |
 
 ## Getting Started
 
@@ -66,7 +65,7 @@ dotnet add package FileNewProject.Labs.WinUI.NightlyCommunity --prerelease
 
 ## Nightly Community Included Fixes
 
-The NightlyCommunity channel includes carefully selected community PRs that address critical bugs:
+The NightlyCommunity channel includes carefully selected [community patches](https://github.com/File-New-Project/Labs.WinUI3/tree/main/.labs/patches) that address critical bugs:
 
 **CueStyler Fixes:**
 - CueStyler: Fix TimedTextPadding being applied incorrectly
