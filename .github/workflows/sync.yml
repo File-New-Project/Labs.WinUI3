@@ -8,7 +8,6 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -27,30 +26,53 @@ jobs:
           git remote add microsoft https://github.com/microsoft/microsoft-ui-xaml.git
           git fetch microsoft winui3/main
 
-      - name: Sync and create PR
+      - name: Check if sync needed
+        id: check
+        run: |
+          if git merge-base --is-ancestor microsoft/winui3/main HEAD; then
+            echo "sync_needed=false" >> $GITHUB_OUTPUT
+            echo "Already up to date with upstream"
+          else
+            echo "sync_needed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Rebase on upstream
+        if: steps.check.outputs.sync_needed == 'true'
+        id: rebase
+        run: |
+          BRANCH_NAME="sync-upstream-$(date +%Y-%m-%d-%H%M)"
+          git checkout -b $BRANCH_NAME
+          
+          if git rebase microsoft/winui3/main; then
+            echo "rebase_status=success" >> $GITHUB_OUTPUT
+          else
+            echo "rebase_status=failed" >> $GITHUB_OUTPUT
+            echo "Rebase conflicts detected:"
+            git diff --name-only --diff-filter=U
+            git rebase --abort
+            exit 1
+          fi
+          
+          echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+
+      - name: Push and create PR
+        if: steps.check.outputs.sync_needed == 'true' && steps.rebase.outputs.rebase_status == 'success'
         env:
           GH_TOKEN: ${{ secrets.SYNC_PAT }}
         run: |
-          BRANCH_NAME="sync-upstream-$(date +%Y%m%d-%H%M%S)"
-          
-          git checkout -b $BRANCH_NAME
-          git merge microsoft/winui3/main --no-edit
-          
-          # Only push and create PR if merge added commits
-          if git diff --quiet origin/main; then
-            echo "Already up to date with upstream"
-            exit 0
-          fi
-          
-          git push -u origin $BRANCH_NAME
+          BRANCH_NAME="${{ steps.rebase.outputs.branch_name }}"
+          git push -f origin $BRANCH_NAME
           
           PR_URL=$(gh pr create \
             --title "Sync upstream winui3/main - $(date +%Y-%m-%d)" \
-            --body "Automated upstream sync" \
+            --body "Rebased Labs changes on latest upstream" \
             --base main \
             --head $BRANCH_NAME)
           
           echo "Created PR: $PR_URL"
+          gh pr merge "$PR_URL" --auto --merge
 
-          gh pr merge "$PR_URL" --auto --squash
-          echo "Auto-merge enabled"
+      - name: Alert on conflict
+        if: steps.rebase.outputs.rebase_status == 'failed'
+        run: |
+          echo "::error::Rebase failed with conflicts. Manual intervention required."
