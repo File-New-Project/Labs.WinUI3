@@ -34,9 +34,24 @@ jobs:
           BRANCH_NAME="sync-upstream-$(date +%Y%m%d-%H%M%S)"
           
           git checkout -b $BRANCH_NAME
-          git merge microsoft/winui3/main --no-edit
           
-          # Only push and create PR if merge added commits
+          if ! git merge microsoft/winui3/main --no-edit; then
+            echo "Merge conflicts detected"
+            
+            if git diff --name-only --diff-filter=U | grep -q "src/eng/Version.Details.xml"; then
+              git checkout --theirs src/eng/Version.Details.xml
+              git add src/eng/Version.Details.xml
+            fi
+            
+            if git diff --name-only --diff-filter=U | grep -q .; then
+              echo "Non-version conflicts detected - needs manual review"
+              git merge --abort
+              exit 1
+            fi
+            
+            git commit -m "Resolved Version.Details.xml conflict with upstream version"
+          fi
+          
           if git diff --quiet origin/main; then
             echo "Already up to date with upstream"
             exit 0
